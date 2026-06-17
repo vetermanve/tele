@@ -38,7 +38,8 @@ P2P_URL = "https://p2p.walletbot.me/p2p/integration-api/v1/item/online"
 COINGECKO_URL = "https://api.coingecko.com/api/v3/simple/price"
 
 POLL_INTERVAL = 20
-TOP_N = 30
+PAGE_SIZE = 50       # серверный потолок одной страницы wallet.tg
+MAX_PAGES = 5        # потолок пагинации (защита): 5*50 = 250
 SHOW_N = 10
 
 PAIRS = [
@@ -106,23 +107,51 @@ FLASH_DURATION = 4  # секунд мигания
 
 # ─── API ──────────────────────────────────────────────────────
 
-def fetch_p2p_offers(crypto, fiat):
+def fetch_p2p_offers(crypto, fiat, cfg=None):
+    """Тянем книгу страницами, добирая следующую пока после фильтра нет SHOW_N.
+
+    Сервер режет pageSize на 50, поэтому глубже идём пагинацией. Если cfg задан —
+    останавливаемся, как только filter_offers даёт >= SHOW_N подходящих: дешёвой
+    книге хватит 1 страницы, строгие фильтры дотянут до MAX_PAGES. API отдаёт
+    по цене возрастанию, страницы склеиваем по порядку.
+    """
     headers = {"Content-Type": "application/json"}
     if API_KEY:
         headers["X-API-Key"] = API_KEY
-    payload = {
-        "cryptoCurrency": crypto, "fiatCurrency": fiat,
-        "side": "SELL", "page": 1, "pageSize": TOP_N,
-    }
-    try:
-        r = requests.post(P2P_URL, json=payload, headers=headers, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        if isinstance(data, list):
-            return data
-        return data.get("data", data.get("items", []))
-    except Exception:
-        return None
+
+    collected = []
+    seen = set()
+    for page in range(1, MAX_PAGES + 1):
+        payload = {
+            "cryptoCurrency": crypto, "fiatCurrency": fiat,
+            "side": "SELL", "page": page, "pageSize": PAGE_SIZE,
+        }
+        try:
+            r = requests.post(P2P_URL, json=payload, headers=headers, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+        except Exception:
+            # первая страница не дошла — нет данных; иначе вернём что успели
+            return collected if collected else None
+
+        items = data if isinstance(data, list) else data.get("data", data.get("items", []))
+        if not items:
+            break
+
+        for ad in items:
+            aid = ad.get("id")
+            if aid in seen:          # страницы могут перекрыться, если книга сдвинулась
+                continue
+            seen.add(aid)
+            collected.append(ad)
+
+        if len(items) < PAGE_SIZE:   # последняя страница книги — глубже нечего брать
+            break
+        # набрали достаточно подходящих под текущие фильтры — дальше не копаем
+        if cfg is not None and len(filter_offers(collected, cfg)) >= SHOW_N:
+            break
+
+    return collected
 
 
 def _try_coingecko():
@@ -234,8 +263,11 @@ def poll_loop():
             elif not market_rates:
                 err = "Курсы недоступны"
 
+        with state_lock:
+            cfg_snapshot = dict(config)
+
         for pair in PAIRS:
-            offers = fetch_p2p_offers(pair["crypto"], pair["fiat"])
+            offers = fetch_p2p_offers(pair["crypto"], pair["fiat"], cfg_snapshot)
             with state_lock:
                 if offers is not None:
                     all_offers[pair["crypto"]] = offers
