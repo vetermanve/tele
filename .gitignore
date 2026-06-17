@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Случайно созданный вложенный venv
+path/
+
+# Секреты — реальный .env только локально, в репо лежит .env.example
+.env
+
+# Локальное состояние и кэш (генерируются на лету)
+.filters.json
+.rates_cache.json
+.rates_cache
