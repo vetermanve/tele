@@ -56,16 +56,19 @@ PAYMENT_LABELS = {
     "uralsib": "Уралсиб", "homecredit": "ХКФ",
 }
 
+# обратная карта «название → код» для ввода исключений (регистр игнорируется)
+LABEL_TO_CODE = {label.lower(): code for code, label in PAYMENT_LABELS.items()}
+
 # ─── фильтры (персистентные) ─────────────────────────────────
 FILTERS_FILE = Path(__file__).parent / ".filters.json"
 
-# поля: amount_min, amount_max, rating
-FIELD_NAMES = ["amount_min", "amount_max", "rating"]
+# поля: amount_min, amount_max, rating, exclude_pay
+FIELD_NAMES = ["amount_min", "amount_max", "rating", "exclude_pay"]
 FIELD_COUNT = len(FIELD_NAMES)
 
 
 def default_config():
-    return {"amount_min": 0, "amount_max": 0, "rating": 98}
+    return {"amount_min": 0, "amount_max": 0, "rating": 98, "exclude_payments": []}
 
 
 def load_config():
@@ -75,6 +78,7 @@ def load_config():
             "amount_min": float(data.get("amount_min", 0)),
             "amount_max": float(data.get("amount_max", 0)),
             "rating": float(data.get("rating", 98)),
+            "exclude_payments": [str(c) for c in data.get("exclude_payments", [])],
         }
     except Exception:
         return default_config()
@@ -305,11 +309,28 @@ def ad_matches(ad, cfg):
 MIN_ORDERS = 50
 
 
+def is_payment_excluded(ad, cfg):
+    """True, если у объявления НЕ осталось ни одного неисключённого способа оплаты.
+
+    Объявление с СБП+Сбер при исключённом «Сбер» остаётся (СБП ещё годен).
+    Скрывается только когда все его способы попали в чёрный список.
+    """
+    excl = cfg.get("exclude_payments") or []
+    if not excl:
+        return False
+    pays = ad.get("payments") or []
+    if not pays:
+        return False
+    return all(p in excl for p in pays)
+
+
 def filter_offers(offers, cfg):
     result = []
     has_range = cfg["amount_min"] > 0 or cfg["amount_max"] > 0
     for ad in (offers or []):
         if ad.get("orderNum", 0) < MIN_ORDERS:
+            continue
+        if is_payment_excluded(ad, cfg):
             continue
         if has_range:
             if not ad_matches(ad, cfg):
@@ -510,10 +531,14 @@ def render_fields_panel():
         cfg = dict(config)
         act = active_field
 
+    excl = cfg.get("exclude_payments") or []
+    excl_str = ", ".join(fmt_pay(c) for c in excl) if excl else None
+
     labels = [
         ("MIN сумма ₽", cfg["amount_min"]),
         ("MAX сумма ₽", cfg["amount_max"]),
         ("Рейтинг %%",  cfg["rating"]),
+        ("Искл. оплату", excl_str),
     ]
 
     lines = []
@@ -530,9 +555,15 @@ def render_fields_panel():
                 val_s = "\033[1m%s\033[0m" % fmt_n(val)
             else:
                 val_s = "\033[2m—\033[0m"
-        else:
+        elif i == 2:
             # рейтинг
             val_s = "\033[1m>= %.0f%%\033[0m" % val
+        else:
+            # исключённые способы оплаты
+            if val:
+                val_s = "\033[1;31m%s\033[0m" % val
+            else:
+                val_s = "\033[2m—\033[0m"
 
         lines.append("%s%-14s  %s" % (prefix, label, val_s))
 
@@ -548,12 +579,17 @@ def get_fields_text():
     return ANSI(render_fields_panel())
 
 def get_hint_text():
-    return ANSI(
-        "\033[2m ↑↓ поле  │  "
-        "число + Enter = задать  │  "
-        "0 = сброс  │  "
-        "Ctrl+C = выход\033[0m"
-    )
+    with state_lock:
+        act = active_field
+    if FIELD_NAMES[act] == "exclude_pay":
+        body = ("↑↓ поле  │  "
+                "код/название оплаты + Enter = вкл/выкл  │  "
+                "0 = сброс  │  Ctrl+C = выход")
+    else:
+        body = ("↑↓ поле  │  "
+                "число + Enter = задать  │  "
+                "0 = сброс  │  Ctrl+C = выход")
+    return ANSI("\033[2m " + body + "\033[0m")
 
 
 def apply_input(text):
@@ -564,6 +600,20 @@ def apply_input(text):
 
     with state_lock:
         field = FIELD_NAMES[active_field]
+
+        if field == "exclude_pay":
+            excl = list(config.get("exclude_payments", []))
+            if line in ("0", "off", "reset", "-"):
+                excl = []
+            else:
+                code = LABEL_TO_CODE.get(line, line)  # название → код, иначе сырой код
+                if code in excl:
+                    excl.remove(code)
+                else:
+                    excl.append(code)
+            config["exclude_payments"] = excl
+            save_config(config)
+            return
 
         if line in ("0", "off", "reset", "-"):
             if field == "rating":
