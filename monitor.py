@@ -301,11 +301,11 @@ def dev_text(pct):
     if pct is None:
         return Text("  n/a", style="dim")
     s = "%+.2f%%" % pct
-    if pct <= 1.0:
+    if pct <= 6.0:
         return Text(s, style="bold green")
-    if pct <= 3.0:
+    if pct <= 8.0:
         return Text(s, style="yellow")
-    if pct <= 5.0:
+    if pct <= 10.0:
         return Text(s, style="dark_orange")
     return Text(s, style="bold red")
 
@@ -545,10 +545,10 @@ def render_display():
     leg.append("  ● онлайн  ", style="green")
     leg.append("○ офлайн    ", style="dim")
     leg.append("Откл: ", style="dim")
-    leg.append(" <1% ", style="bold green")
-    leg.append(" 1-3% ", style="yellow")
-    leg.append(" 3-5% ", style="dark_orange")
-    leg.append(" >5% ", style="bold red")
+    leg.append(" <6% ", style="bold green")
+    leg.append(" 6-8% ", style="yellow")
+    leg.append(" 8-10% ", style="dark_orange")
+    leg.append(" >10% ", style="bold red")
     rows.append(leg)
 
     buf = StringIO()
