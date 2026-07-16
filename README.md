@@ -21,7 +21,11 @@
 ```bash
 git clone git@github.com:vetermanve/tele.git
 cd tele
+```
 
+Дальше можно не возиться с окружением вручную — `./run.sh` всё сделает сам (см. [Запуск](#запуск)). Ручная установка, если нужна:
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -44,6 +48,16 @@ export WALLET_TG_API_KEY=...
 ```
 
 ## Запуск
+
+Одной командой — скрипт сам создаёт `.venv`, ставит зависимости (только при изменении `requirements.txt`) и стартует мониторинг:
+
+```bash
+./run.sh
+```
+
+Если `.env` ещё нет — скрипт остановится и подскажет скопировать `.env.example`.
+
+Вручную (при активированном окружении):
 
 ```bash
 python monitor.py
@@ -76,6 +90,7 @@ python monitor.py
 
 ```
 monitor.py        — весь код: поллинг, рендеринг, TUI
+run.sh            — запуск одной командой (venv + зависимости + старт)
 requirements.txt  — зависимости
 .env.example      — шаблон конфигурации
 .filters.json     — сохранённые фильтры (создаётся на лету, в .gitignore)
